@@ -1,0 +1,6 @@
+import morgan from 'morgan';
+import config from '../config/index.js';
+
+const requestLogger = morgan(config.isProduction ? 'combined' : 'dev');
+
+export default requestLogger;
