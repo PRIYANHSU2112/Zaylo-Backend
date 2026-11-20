@@ -195,3 +195,27 @@ export async function importDraftProducts(Product, storage, assetsDir, { dryRun 
   }
   return results;
 }
+
+/**
+ * Set (or create) a staff account password. Revokes that user's refresh sessions.
+ * @returns {Promise<'updated'|'created'>}
+ */
+export async function setStaffPassword(User, RefreshToken, { email, password, role = 'Admin', create = false }) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Enter a valid --email');
+  if (!password || password.length < 10) throw new Error('Password must be at least 10 characters');
+  if (!['Admin', 'Manager'].includes(role)) throw new Error('--role must be Admin or Manager');
+
+  const user = await User.findOne({ email: normalized }).select('+password');
+  if (!user) {
+    if (!create) throw new Error(`No user with email ${normalized}. Re-run with --create to create it.`);
+    await User.create({ name: role === 'Admin' ? 'Zaylo Admin' : 'Zaylo Manager', email: normalized, password, role, status: 'Active' });
+    return 'created';
+  }
+  user.password = password; // hashed by the User pre-save hook
+  if (create) user.role = role;
+  user.status = 'Active';
+  await user.save();
+  await RefreshToken.updateMany({ user: user._id, revokedAt: { $exists: false } }, { $set: { revokedAt: new Date() } });
+  return 'updated';
+}

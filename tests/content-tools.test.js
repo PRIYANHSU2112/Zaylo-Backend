@@ -193,3 +193,25 @@ describe('upload delete', () => {
     expect(res.status).toBe(400)
   })
 })
+
+describe('admin password recovery', () => {
+  it('updates or creates a staff account that can then log in; rejects weak input', async () => {
+    const { setStaffPassword } = await import('../src/scripts/dbTools.js')
+    const { default: User } = await import('../src/models/User.js')
+    const { default: RefreshToken } = await import('../src/models/RefreshToken.js')
+    const email = `boss${Date.now()}@test.dev`
+
+    await expect(setStaffPassword(User, RefreshToken, { email, password: 'LongEnough123' })).rejects.toThrow(/--create/)
+    await expect(setStaffPassword(User, RefreshToken, { email, password: 'short', create: true })).rejects.toThrow(/10 characters/)
+
+    expect(await setStaffPassword(User, RefreshToken, { email, password: 'LongEnough123', create: true })).toBe('created')
+    let login = await api().post('/api/v1/auth/login').send({ email, password: 'LongEnough123', role: 'Admin' })
+    expect(login.status).toBe(200)
+
+    expect(await setStaffPassword(User, RefreshToken, { email, password: 'EvenLonger4567' })).toBe('updated')
+    login = await api().post('/api/v1/auth/login').send({ email, password: 'LongEnough123', role: 'Admin' })
+    expect(login.status).toBe(401)
+    login = await api().post('/api/v1/auth/login').send({ email, password: 'EvenLonger4567', role: 'Admin' })
+    expect(login.status).toBe(200)
+  })
+})

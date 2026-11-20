@@ -24,7 +24,13 @@ class Database {
       logger.warn('MongoDB disconnected');
     });
 
-    logger.info('MongoDB connected');
+    // Log WHICH database we use (no credentials) — a URI without "/<dbName>" silently
+    // falls back to the "test" database, which has no users (every login → 401).
+    const { name, host } = mongoose.connection;
+    logger.info(`MongoDB connected — database "${name}" on ${host}`);
+    if (name === 'test') {
+      logger.warn('MongoDB database is "test" — MONGODB_URI is probably missing "/zaylo" before the "?"');
+    }
     await this.detectTransactionSupport();
     return this.connection;
   }

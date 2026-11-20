@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "db:backup": "node src/scripts/backup.js",
     "db:reset": "node src/scripts/reset.js",
-    "db:import-products": "node src/scripts/importProducts.js"
+    "db:import-products": "node src/scripts/importProducts.js",
+    "admin:password": "node src/scripts/setAdminPassword.js"
   },
   "engines": {
     "node": ">=20"
