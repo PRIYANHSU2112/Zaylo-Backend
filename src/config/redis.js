@@ -38,7 +38,6 @@ function buildRedisOptions() {
         // Stop retrying after 3 attempts to prevent infinite connection loops
         return null;
       }
-      logger.warn(`[Redis] Retrying connection... Attempt: ${times}`);
       return Math.min(times * 500, 2000);
     },
   };
@@ -89,13 +88,17 @@ class RedisClient {
    * @returns {Promise<import('ioredis').default>}
    */
   async connect() {
+    if (!config.redis.enabled) {
+      logger.info('[Redis] Disabled (set REDIS_URL or REDIS_ENABLED=true to enable) — using in-memory cache');
+      return null;
+    }
     if (this.client?.status === 'ready') {
       return this.client;
     }
 
     if (!this.client) {
       const redisOptions = buildRedisOptions();
-      this.client = new Redis(redisOptions);
+      this.client = config.redis.url ? new Redis(config.redis.url, redisOptions) : new Redis(redisOptions);
       applySafeMethods(this.client);
 
       this.client.on('connect', () => {
@@ -107,24 +110,15 @@ class RedisClient {
         logger.info('[Redis] Ready');
       });
 
+      // One concise line per failure instead of full error dumps
       this.client.on('error', (err) => {
         this.client.isRedisAvailable = false;
-        logger.error('[Redis] Error', err);
-      });
-
-      this.client.on('close', () => {
-        this.client.isRedisAvailable = false;
-        logger.warn('[Redis] Connection closed');
+        logger.warn(`[Redis] ${err.code || 'Error'}: ${err.message}`);
       });
 
       this.client.on('end', () => {
         this.client.isRedisAvailable = false;
-        logger.warn('[Redis] Connection ended');
-      });
-
-      this.client.on('reconnecting', () => {
-        this.client.isRedisAvailable = false;
-        logger.warn('[Redis] Reconnecting…');
+        logger.warn('[Redis] Unavailable — continuing without Redis');
       });
     }
 
@@ -134,10 +128,7 @@ class RedisClient {
         this.client.isRedisAvailable = this.client.status === 'ready';
       } catch (err) {
         this.client.isRedisAvailable = false;
-        logger.error(
-          '[Redis] Failed to connect — API will run degraded until Redis is available',
-          err,
-        );
+        logger.warn(`[Redis] Could not connect (${err.message}) — continuing without Redis`);
       }
     }
 
@@ -157,6 +148,7 @@ class RedisClient {
   }
 
   async ping() {
+    if (!config.redis.enabled) return { ok: true, status: 'disabled' };
     if (!this.client || !this.client.isRedisAvailable) {
       return { ok: false, status: 'disconnected' };
     }

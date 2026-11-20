@@ -20,9 +20,8 @@ const HOME_CACHE_TTL = 120;
 const PRODUCT_CARD_FIELDS =
   'slug name price mrp image images tagline rating reviewCount isVeg isNew isFeatured homePosition category status stock weight';
 
-function invalidateHomeCaches() {
-  cacheDel(HOME_CACHE_KEY);
-  cacheDel(BANNERS_CACHE_KEY);
+async function invalidateHomeCaches() {
+  await cacheDel(HOME_CACHE_KEY, BANNERS_CACHE_KEY);
 }
 
 function leanProductCard(doc) {
@@ -95,7 +94,7 @@ class HomeService {
   }
 
   async getHomePage() {
-    const cached = cacheGet(HOME_CACHE_KEY);
+    const cached = await cacheGet(HOME_CACHE_KEY);
     if (cached) return cached;
 
     const [
@@ -225,7 +224,7 @@ class HomeService {
       testimonials,
     };
 
-    cacheSet(HOME_CACHE_KEY, data, HOME_CACHE_TTL);
+    await cacheSet(HOME_CACHE_KEY, data, HOME_CACHE_TTL);
     return data;
   }
 
@@ -244,21 +243,21 @@ class HomeService {
 
   async createLandingImage(body) {
     const doc = await HomeLandingImage.create(body);
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async updateLandingImage(id, body) {
     const doc = await HomeLandingImage.findByIdAndUpdate(id, body, { new: true, runValidators: true }).lean();
     if (!doc) throw ApiError.notFound('Landing image not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async deleteLandingImage(id) {
     const doc = await HomeLandingImage.findByIdAndDelete(id).lean();
     if (!doc) throw ApiError.notFound('Landing image not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return { id };
   }
 
@@ -293,7 +292,7 @@ class HomeService {
   async createBundle(body) {
     await this.#assertPricing(body);
     const doc = await Bundle.create(body);
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
@@ -303,14 +302,14 @@ class HomeService {
     await this.#assertPricing(body, existing);
     const doc = await Bundle.findByIdAndUpdate(id, body, { new: true, runValidators: true }).lean();
     if (!doc) throw ApiError.notFound('Bundle not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async deleteBundle(id) {
     const doc = await Bundle.findByIdAndDelete(id).lean();
     if (!doc) throw ApiError.notFound('Bundle not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return { id };
   }
 }

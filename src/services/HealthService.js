@@ -1,5 +1,6 @@
 import database from '../config/database.js';
 import redisClient from '../config/redis.js';
+import { cacheBackend } from '../utils/cache.js';
 
 class HealthService {
   async getStatus() {
@@ -8,7 +9,8 @@ class HealthService {
       redisClient.ping(),
     ]);
 
-    const healthy = mongo.ok && redis.ok;
+    // Redis is optional: a configured-but-down Redis is reported, but only MongoDB decides health.
+    const healthy = mongo.ok;
 
     return {
       status: healthy ? 'ok' : 'degraded',
@@ -17,6 +19,7 @@ class HealthService {
       services: {
         mongodb: mongo,
         redis,
+        cache: { backend: cacheBackend() },
       },
     };
   }

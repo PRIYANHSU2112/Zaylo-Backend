@@ -84,11 +84,11 @@ export function productCard(p) {
 
 class CommerceService {
   async getCommerce() {
-    const cached = cacheGet('settings:commerce');
+    const cached = await cacheGet('settings:commerce');
     if (cached) return cached;
     const doc = await Settings.findOne({ key: 'default' }).select('commerce').lean();
     const data = withCommerceDefaults(doc?.commerce);
-    cacheSet('settings:commerce', data, 60);
+    await cacheSet('settings:commerce', data, 60);
     return data;
   }
 

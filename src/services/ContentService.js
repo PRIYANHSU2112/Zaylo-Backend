@@ -117,21 +117,21 @@ class ContentService {
 
   async createAnnouncement(body) {
     const doc = await Announcement.create(body);
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async updateAnnouncement(id, body) {
     const doc = await Announcement.findByIdAndUpdate(id, body, { new: true }).lean();
     if (!doc) throw ApiError.notFound('Announcement not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async deleteAnnouncement(id) {
     const doc = await Announcement.findByIdAndDelete(id).lean();
     if (!doc) throw ApiError.notFound('Announcement not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return { id };
   }
 
@@ -157,27 +157,27 @@ class ContentService {
       throw ApiError.badRequest('Add a heading or upload a banner image');
     }
     const doc = await Promo.create(body);
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async updatePromo(id, body) {
     const doc = await Promo.findByIdAndUpdate(id, body, { new: true }).lean();
     if (!doc) throw ApiError.notFound('Promo not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async deletePromo(id) {
     const doc = await Promo.findByIdAndDelete(id).lean();
     if (!doc) throw ApiError.notFound('Promo not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return { id };
   }
 
   async getPublicSettings() {
     const cacheKey = 'settings:public';
-    const cached = cacheGet(cacheKey);
+    const cached = await cacheGet(cacheKey);
     if (cached) return cached;
     let doc = await Settings.findOne({ key: 'default' }).lean();
     if (!doc) {
@@ -203,7 +203,7 @@ class ContentService {
       commerce: withCommerceDefaults(doc.commerce),
       payments: { onlineEnabled: config.paymentsEnabled },
     };
-    cacheSet(cacheKey, data, 120);
+    await cacheSet(cacheKey, data, 120);
     return data;
   }
 
@@ -219,21 +219,21 @@ class ContentService {
       { $set: flattenOneLevel(body) },
       { new: true, upsert: true, runValidators: true },
     ).lean();
-    cacheDel('settings:public');
-    cacheDel('settings:commerce');
+    await cacheDel('settings:public');
+    await cacheDel('settings:commerce');
     return serialize(doc);
   }
 
   async getCmsHome() {
     const cacheKey = 'cms:home';
-    const cached = cacheGet(cacheKey);
+    const cached = await cacheGet(cacheKey);
     if (cached) return cached;
     let doc = await CmsContent.findOne({ key: 'home' }).lean();
     if (!doc) {
       doc = (await CmsContent.create({ key: 'home' })).toObject();
     }
     const data = serialize(doc);
-    cacheSet(cacheKey, data, 300);
+    await cacheSet(cacheKey, data, 300);
     return data;
   }
 
@@ -243,8 +243,8 @@ class ContentService {
       { $set: body },
       { new: true, upsert: true },
     ).lean();
-    cacheDel('cms:home');
-    invalidateHomeCaches();
+    await cacheDel('cms:home');
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 }

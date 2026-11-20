@@ -142,8 +142,8 @@ class CatalogService {
     const data = normalizeProductBody({ ...body, slug });
     assertPublishable({ ...data, status: data.status || 'Active' });
     const doc = await Product.create({ ...data, isVeg: data.isVeg ?? true, isNew: data.isNew ?? false });
-    cacheDelPrefix('categories:');
-    invalidateHomeCaches();
+    await cacheDelPrefix('categories:');
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
@@ -166,7 +166,7 @@ class CatalogService {
     }
     const doc = await Product.findByIdAndUpdate(id, update, { new: true, runValidators: true }).lean();
     if (!doc) throw ApiError.notFound('Product not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
@@ -183,26 +183,26 @@ class CatalogService {
       { new: true, runValidators: true },
     ).lean();
     if (!doc) throw ApiError.notFound('Product not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async deleteProduct(id) {
     const doc = await Product.findByIdAndDelete(id).lean();
     if (!doc) throw ApiError.notFound('Product not found');
-    invalidateHomeCaches();
+    await invalidateHomeCaches();
     return { id };
   }
 
   async bulkProducts({ action, ids, status }) {
     if (action === 'delete') {
       await Product.deleteMany({ _id: { $in: ids } });
-      invalidateHomeCaches();
+      await invalidateHomeCaches();
       return { deleted: ids.length };
     }
     if (action === 'status' && status) {
       await Product.updateMany({ _id: { $in: ids } }, { status });
-      invalidateHomeCaches();
+      await invalidateHomeCaches();
       return { updated: ids.length, status };
     }
     throw ApiError.badRequest('Invalid bulk action');
@@ -210,12 +210,12 @@ class CatalogService {
 
   async listPublicCategories() {
     const cacheKey = 'categories:public';
-    const cached = cacheGet(cacheKey);
+    const cached = await cacheGet(cacheKey);
     if (cached) return cached;
 
     const items = await Category.find({ status: 'Active' }).sort({ name: 1 }).lean();
     const data = serializeMany(items);
-    cacheSet(cacheKey, data, 120);
+    await cacheSet(cacheKey, data, 120);
     return data;
   }
 
@@ -243,8 +243,8 @@ class CatalogService {
       slug,
       comingSoon: body.status === 'Inactive' ? true : Boolean(body.comingSoon),
     });
-    cacheDelPrefix('categories:');
-    invalidateHomeCaches();
+    await cacheDelPrefix('categories:');
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
@@ -259,16 +259,16 @@ class CatalogService {
       runValidators: true,
     }).lean();
     if (!doc) throw ApiError.notFound('Category not found');
-    cacheDelPrefix('categories:');
-    invalidateHomeCaches();
+    await cacheDelPrefix('categories:');
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async deleteCategory(id) {
     const doc = await Category.findByIdAndDelete(id).lean();
     if (!doc) throw ApiError.notFound('Category not found');
-    cacheDelPrefix('categories:');
-    invalidateHomeCaches();
+    await cacheDelPrefix('categories:');
+    await invalidateHomeCaches();
     return { id };
   }
 
@@ -280,23 +280,23 @@ class CatalogService {
       { new: true, runValidators: true },
     ).lean();
     if (!doc) throw ApiError.notFound('Category not found');
-    cacheDelPrefix('categories:');
-    invalidateHomeCaches();
+    await cacheDelPrefix('categories:');
+    await invalidateHomeCaches();
     return serialize(doc);
   }
 
   async bulkCategories({ action, ids, status }) {
     if (action === 'delete') {
       await Category.deleteMany({ _id: { $in: ids } });
-      cacheDelPrefix('categories:');
-      invalidateHomeCaches();
+      await cacheDelPrefix('categories:');
+      await invalidateHomeCaches();
       return { deleted: ids.length };
     }
     if (action === 'status' && status) {
       const comingSoon = status === 'Inactive';
       await Category.updateMany({ _id: { $in: ids } }, { status, comingSoon });
-      cacheDelPrefix('categories:');
-      invalidateHomeCaches();
+      await cacheDelPrefix('categories:');
+      await invalidateHomeCaches();
       return { updated: ids.length, status };
     }
     throw ApiError.badRequest('Invalid bulk action');

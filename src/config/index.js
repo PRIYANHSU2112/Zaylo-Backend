@@ -2,7 +2,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const BASE_REQUIRED_IN_PRODUCTION = ['MONGODB_URI', 'REDIS_HOST', 'JWT_SECRET'];
+// Redis is optional (no feature depends on it) — not required in production.
+const BASE_REQUIRED_IN_PRODUCTION = ['MONGODB_URI', 'JWT_SECRET'];
 
 function parseClientUrls(value) {
   if (!value || value.trim() === '') {
@@ -34,6 +35,10 @@ class Config {
     this.mongodbUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/zaylo';
 
     this.redis = {
+      // Opt-in: only connect when a Redis URL is given or REDIS_ENABLED=true.
+      // Hosts like Render have no Redis on 127.0.0.1, and nothing requires it.
+      enabled: Boolean(process.env.REDIS_URL?.trim()) || process.env.REDIS_ENABLED === 'true',
+      url: process.env.REDIS_URL?.trim() || '',
       host: process.env.REDIS_HOST || '127.0.0.1',
       port: Number(process.env.REDIS_PORT) || 6379,
       password: process.env.REDIS_PASSWORD?.trim() || undefined,
