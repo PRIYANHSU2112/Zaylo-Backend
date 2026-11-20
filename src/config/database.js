@@ -5,6 +5,7 @@ import config from './index.js';
 class Database {
   constructor() {
     this.connection = null;
+    this.supportsTransactions = false;
   }
 
   async connect(uri = config.mongodbUri) {
@@ -24,7 +25,30 @@ class Database {
     });
 
     logger.info('MongoDB connected');
+    await this.detectTransactionSupport();
     return this.connection;
+  }
+
+  /**
+   * Multi-document transactions need a replica set / sharded cluster.
+   * Probed once at startup; order services read `database.supportsTransactions`.
+   */
+  async detectTransactionSupport() {
+    try {
+      const hello = await mongoose.connection.db.admin().command({ hello: 1 });
+      this.supportsTransactions = Boolean(hello.setName || hello.msg === 'isdbgrid');
+    } catch {
+      this.supportsTransactions = false;
+    }
+    if (this.supportsTransactions) {
+      logger.info('MongoDB transactions: supported (replica set detected)');
+    } else {
+      logger.warn(
+        'MongoDB transactions: NOT supported (standalone server). Orders use atomic conditional ' +
+          'stock updates with compensating rollback. Use a replica set (e.g. Atlas) in production.',
+      );
+    }
+    return this.supportsTransactions;
   }
 
   async disconnect() {

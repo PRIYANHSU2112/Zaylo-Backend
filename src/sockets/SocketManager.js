@@ -1,4 +1,5 @@
 import { Server } from 'socket.io';
+import jwt from 'jsonwebtoken';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import { registerConnectionHandlers } from './handlers/connection.handler.js';
@@ -23,11 +24,21 @@ class SocketManager {
       pingInterval: 25000,
     });
 
-    // Auth stub — replace with JWT verification middleware later
+    // Verify JWT on handshake. Guests may connect but can only join their own rooms.
     this.io.use((socket, next) => {
-      const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
-      socket.data.user = token ? { tokenPresent: true } : { guest: true };
-      next();
+      const raw = socket.handshake.auth?.token || socket.handshake.headers?.authorization || '';
+      const token = String(raw).replace(/^Bearer\s+/i, '');
+      if (!token) {
+        socket.data.user = null;
+        return next();
+      }
+      try {
+        const payload = jwt.verify(token, config.jwtSecret);
+        socket.data.user = { id: payload.sub, role: payload.role };
+        return next();
+      } catch {
+        return next(new Error('Invalid or expired token'));
+      }
     });
 
     this.io.on('connection', (socket) => {
@@ -61,6 +72,12 @@ class SocketManager {
   emit(event, payload) {
     if (!this.io) return;
     this.io.emit(event, payload);
+  }
+
+  /** Room emit that is a no-op before init (background jobs). */
+  toRoomSafe(room, event, payload) {
+    if (!this.io) return;
+    this.io.to(room).emit(event, payload);
   }
 
   async close() {

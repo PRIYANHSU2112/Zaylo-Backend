@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Zaylo Backend
 
 Monolithic Node.js API for Zaylo — Express, Socket.io, Redis, MongoDB/Mongoose, class-based MVC.
@@ -133,3 +134,6 @@ Example mount:
 import productRoutes from './product.routes.js';
 router.use('/products', productRoutes);
 ```
+=======
+# Zaylo-Backend
+>>>>>>> 196e8197eb593dbad48c01ba491d3f5298fe1372

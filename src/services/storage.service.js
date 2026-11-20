@@ -125,7 +125,7 @@ class StorageService {
           logger.warn(`Failed to delete original after WebP compress: ${original.key}`, err);
         }
 
-        SocketManager.emit('storage:compressed', {
+        SocketManager.toRoomSafe('staff', 'storage:compressed', {
           jobId,
           oldKey: original.key,
           oldUrl: original.url,
@@ -135,7 +135,7 @@ class StorageService {
         logger.info(`Background WebP ready [${jobId}] ${compressed.key}`);
       } catch (err) {
         logger.error(`Background WebP failed [${jobId}]`, err);
-        SocketManager.emit('storage:compress-failed', {
+        SocketManager.toRoomSafe('staff', 'storage:compress-failed', {
           jobId,
           key: original.key,
           url: original.url,
@@ -395,6 +395,18 @@ class StorageService {
    * @param {string} key
    * @returns {string}
    */
+  /**
+   * Map a public URL back to its object key — only for URLs inside our own
+   * public base (never deletes arbitrary/external URLs). Returns null otherwise.
+   */
+  keyFromPublicUrl(url) {
+    const base = (storage.publicUrl || '').replace(/\/+$/, '');
+    if (!base || typeof url !== 'string' || !url.startsWith(base + '/')) return null;
+    const key = decodeURIComponent(url.slice(base.length + 1).split('?')[0]);
+    if (!key || key.includes('..')) return null;
+    return key;
+  }
+
   getPublicUrl(key) {
     const objectKey = assertKey(key);
     const base = storage.publicUrl;

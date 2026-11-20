@@ -48,6 +48,13 @@ class AdminController {
     return ApiResponse.ok(res, data, 'Presigned upload ready');
   }
 
+  async deleteUpload(req, res) {
+    const key = storageService.keyFromPublicUrl(req.body?.url);
+    if (!key) throw ApiError.badRequest("Only files stored in this site's media bucket can be deleted");
+    const data = await storageService.deleteFile(key);
+    return ApiResponse.ok(res, data, 'File deleted');
+  }
+
   async completeUpload(req, res) {
     const data = await storageService.confirmUpload(req.body.key);
     return ApiResponse.ok(res, data, 'Upload confirmed');

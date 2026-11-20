@@ -1,3 +1,6 @@
+import config from '../config/index.js';
+import { liveBannerFilter, presentBanner } from '../utils/banners.js';
+import { withCommerceDefaults } from './CommerceService.js';
 import Blog from '../models/Blog.js';
 import Gallery from '../models/Gallery.js';
 import Announcement from '../models/Announcement.js';
@@ -86,21 +89,19 @@ class ContentService {
     return { id };
   }
 
-  async getBanners() {
-    const cacheKey = 'banners:public';
-    const cached = cacheGet(cacheKey);
-    if (cached) return cached;
-
+  /** Public banners: Active + inside schedule window; optional ?placement= filter. */
+  async getBanners(placement) {
     const [announcements, promos] = await Promise.all([
       Announcement.find({ status: 'Active' }).sort({ position: 1, createdAt: -1 }).lean(),
-      Promo.find({ status: 'Active' }).sort({ position: 1, createdAt: -1 }).lean(),
+      Promo.find(liveBannerFilter()).sort({ position: 1, createdAt: -1 }).lean(),
     ]);
-    const data = {
+    let banners = promos.map(presentBanner);
+    if (placement) banners = banners.filter((b) => b.placement === placement);
+    return {
       announcements: serializeMany(announcements),
-      promos: serializeMany(promos),
+      banners,
+      promos: banners, // legacy key
     };
-    cacheSet(cacheKey, data, 120);
-    return data;
   }
 
   async listAnnouncements(query) {
@@ -138,6 +139,12 @@ class ContentService {
     const { page, limit, skip, sort } = parseListQuery(query);
     const filter = {};
     if (query.status) filter.status = query.status;
+    if (query.placement) {
+      const legacy = Object.entries({ general: 'hero', 'home-festival': 'home-middle', 'home-dealer': 'home-bottom' })
+        .filter(([, v]) => v === query.placement)
+        .map(([k]) => k);
+      filter.slot = { $in: [query.placement, ...legacy] };
+    }
     const [items, total] = await Promise.all([
       Promo.find(filter).sort(sort).skip(skip).limit(limit).lean(),
       Promo.countDocuments(filter),
@@ -146,6 +153,9 @@ class ContentService {
   }
 
   async createPromo(body) {
+    if (!body.title && !body.imageUrl && !body.bgImageUrl) {
+      throw ApiError.badRequest('Add a heading or upload a banner image');
+    }
     const doc = await Promo.create(body);
     invalidateHomeCaches();
     return serialize(doc);
@@ -188,7 +198,10 @@ class ContentService {
         themeDefault: doc.general?.themeDefault,
         modeDefault: doc.general?.modeDefault,
         maintenanceMode: doc.general?.maintenanceMode,
+        allowRegistrations: doc.general?.allowRegistrations !== false,
       },
+      commerce: withCommerceDefaults(doc.commerce),
+      payments: { onlineEnabled: config.paymentsEnabled },
     };
     cacheSet(cacheKey, data, 120);
     return data;
@@ -203,10 +216,11 @@ class ContentService {
   async updateSettings(body) {
     const doc = await Settings.findOneAndUpdate(
       { key: 'default' },
-      { $set: body },
-      { new: true, upsert: true },
+      { $set: flattenOneLevel(body) },
+      { new: true, upsert: true, runValidators: true },
     ).lean();
     cacheDel('settings:public');
+    cacheDel('settings:commerce');
     return serialize(doc);
   }
 
@@ -236,3 +250,16 @@ class ContentService {
 }
 
 export default new ContentService();
+
+/** `{ commerce: { codFee: 5 } }` → `{ 'commerce.codFee': 5 }` so partial section updates merge. */
+function flattenOneLevel(body = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const [sub, v] of Object.entries(value)) out[`${key}.${sub}`] = v;
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}

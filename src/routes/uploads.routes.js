@@ -3,7 +3,7 @@ import asyncHandler from '../middlewares/asyncHandler.js';
 import { staffOnly } from '../middlewares/authorize.middleware.js';
 import { uploadSingle } from '../middlewares/upload.middleware.js';
 import validate from '../middlewares/validate.middleware.js';
-import { uploadPresignSchema, uploadCompleteSchema } from '../validations/index.js';
+import { uploadPresignSchema, uploadCompleteSchema, uploadDeleteSchema } from '../validations/index.js';
 import AdminController from '../controllers/AdminController.js';
 
 const router = Router();
@@ -27,6 +27,13 @@ router.post(
   staffOnly,
   uploadSingle('file'),
   asyncHandler(AdminController.upload.bind(AdminController)),
+);
+
+router.delete(
+  '/',
+  staffOnly,
+  validate(uploadDeleteSchema),
+  asyncHandler(AdminController.deleteUpload.bind(AdminController)),
 );
 
 export default router;

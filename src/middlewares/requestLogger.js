@@ -1,6 +1,8 @@
 import morgan from 'morgan';
 import config from '../config/index.js';
 
-const requestLogger = morgan(config.isProduction ? 'combined' : 'dev');
+const requestLogger = morgan(config.isProduction ? 'combined' : 'dev', {
+  skip: () => config.env === 'test',
+});
 
 export default requestLogger;

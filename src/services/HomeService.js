@@ -5,6 +5,9 @@ import Category from '../models/Category.js';
 import Product from '../models/Product.js';
 import Bundle from '../models/Bundle.js';
 import CmsContent from '../models/CmsContent.js';
+import Order from '../models/Order.js';
+import { liveBannerFilter, presentBanner, groupByPlacement } from '../utils/banners.js';
+import { bundleView } from './CommerceService.js';
 import ApiError from '../utils/ApiError.js';
 import { parseListQuery, buildMeta } from '../utils/pagination.js';
 import { serialize, serializeMany } from '../utils/serialize.js';
@@ -15,7 +18,7 @@ const BANNERS_CACHE_KEY = 'banners:public';
 const HOME_CACHE_TTL = 120;
 
 const PRODUCT_CARD_FIELDS =
-  'slug name price mrp image tagline rating reviewCount isVeg isNew homePosition category status';
+  'slug name price mrp image images tagline rating reviewCount isVeg isNew isFeatured homePosition category status stock weight';
 
 function invalidateHomeCaches() {
   cacheDel(HOME_CACHE_KEY);
@@ -39,10 +42,58 @@ function leanProductCard(doc) {
     isNew: s.isNew,
     position: s.homePosition ?? 0,
     category: s.category,
+    weight: s.weight || '',
+    stock: s.stock ?? 0,
+    isFeatured: Boolean(s.isFeatured),
+    discountPercent: s.mrp > s.price ? Math.round(((s.mrp - s.price) / s.mrp) * 100) : 0,
   };
 }
 
 class HomeService {
+  /**
+   * Best sellers from REAL sales only (non-cancelled orders, last 180 days),
+   * counting bundle components too. Empty when there are no sales.
+   */
+  async #bestSellers(limit = 8) {
+    const since = new Date(Date.now() - 180 * 86400_000);
+    const rows = await Order.aggregate([
+      { $match: { status: { $ne: 'Cancelled' }, createdAt: { $gte: since } } },
+      { $unwind: '$items' },
+      {
+        $project: {
+          pairs: {
+            $cond: [
+              { $eq: ['$items.kind', 'bundle'] },
+              {
+                $map: {
+                  input: { $ifNull: ['$items.components', []] },
+                  as: 'c',
+                  in: { product: '$c.product', qty: { $multiply: ['$c.quantity', '$items.quantity'] } },
+                },
+              },
+              [{ product: '$items.product', qty: '$items.quantity' }],
+            ],
+          },
+        },
+      },
+      { $unwind: '$pairs' },
+      { $match: { 'pairs.product': { $ne: null } } },
+      { $group: { _id: '$pairs.product', sold: { $sum: '$pairs.qty' } } },
+      { $sort: { sold: -1 } },
+      { $limit: limit * 2 },
+    ]);
+    if (!rows.length) return [];
+    const products = await Product.find({ _id: { $in: rows.map((r) => r._id) }, status: 'Active' })
+      .select(PRODUCT_CARD_FIELDS)
+      .lean();
+    const byId = new Map(products.map((p) => [String(p._id), p]));
+    return rows
+      .map((r) => byId.get(String(r._id)))
+      .filter(Boolean)
+      .slice(0, limit)
+      .map(leanProductCard);
+  }
+
   async getHomePage() {
     const cached = cacheGet(HOME_CACHE_KEY);
     if (cached) return cached;
@@ -57,7 +108,7 @@ class HomeService {
       cms,
     ] = await Promise.all([
       Announcement.find({ status: 'Active' }).sort({ position: 1, createdAt: -1 }).lean(),
-      Promo.find({ status: 'Active' }).sort({ position: 1, createdAt: -1 }).lean(),
+      Promo.find(liveBannerFilter()).sort({ position: 1, createdAt: -1 }).lean(),
       HomeLandingImage.find({ status: 'Active' }).sort({ position: 1, createdAt: -1 }).lean(),
       Category.find({ status: 'Active' })
         .sort({ homePosition: 1, name: 1 })
@@ -75,31 +126,57 @@ class HomeService {
       CmsContent.findOne({ key: 'home' }).lean(),
     ]);
 
+    const [featuredRaw, newArrivalsRaw, bestSellers] = await Promise.all([
+      Product.find({ status: 'Active', isFeatured: true })
+        .select(PRODUCT_CARD_FIELDS)
+        .sort({ homePosition: 1, createdAt: -1 })
+        .limit(8)
+        .lean(),
+      Product.find({ status: 'Active' }).select(PRODUCT_CARD_FIELDS).sort({ createdAt: -1 }).limit(8).lean(),
+      this.#bestSellers(),
+    ]);
+
+    // No product flagged "Popular" in admin yet → show the newest active products
+    // (real catalogue data) instead of an empty section.
+    const popularList = popularProducts.length
+      ? popularProducts
+      : await Product.find({ status: 'Active' })
+          .select(PRODUCT_CARD_FIELDS)
+          .sort({ homePosition: 1, createdAt: -1 })
+          .limit(8)
+          .lean();
+
     const productIdSet = new Set();
     for (const b of bundlesRaw) {
       for (const pid of b.productIds || []) productIdSet.add(String(pid));
     }
     const bundleProducts = productIdSet.size
-      ? await Product.find({ _id: { $in: [...productIdSet] }, status: 'Active' })
+      ? await Product.find({ _id: { $in: [...productIdSet] } })
           .select(PRODUCT_CARD_FIELDS)
           .lean()
       : [];
+    const rawById = new Map(bundleProducts.map((p) => [String(p._id), p]));
     const productMap = new Map(bundleProducts.map((p) => [String(p._id), leanProductCard(p)]));
 
-    const bundles = bundlesRaw.map((b) => {
-      const s = serialize(b);
-      return {
-        id: s.id,
-        name: s.name,
-        tagline: s.tagline || '',
-        price: s.price,
-        mrp: s.mrp,
-        position: s.position ?? 0,
-        items: (b.productIds || [])
-          .map((pid) => productMap.get(String(pid)))
-          .filter(Boolean),
-      };
-    });
+    // Only purchasable packs (active bundle + all products active); price is the bundle price.
+    const bundles = bundlesRaw
+      .map((b) => ({ b, view: bundleView(b, rawById) }))
+      .filter(({ view }) => view.purchasable)
+      .map(({ b, view }) => {
+        const s = serialize(b);
+        return {
+          id: s.id,
+          kind: 'bundle',
+          name: s.name,
+          tagline: s.tagline || '',
+          price: s.price,
+          mrp: s.mrp,
+          image: view.image,
+          stock: view.stock,
+          position: s.position ?? 0,
+          items: (b.productIds || []).map((pid) => productMap.get(String(pid))).filter(Boolean),
+        };
+      });
 
     const testimonials = [...(cms?.testimonials || [])]
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
@@ -121,20 +198,12 @@ class HomeService {
         link: a.link || '/products',
         position: a.position ?? 0,
       })),
-      promos: serializeMany(promos).map((p) => ({
-        id: p.id,
-        title: p.title,
-        subtitle: p.subtitle || '',
-        cta: p.cta || 'Shop Now',
-        link: p.link || '/products',
-        gradient: p.gradient || '',
-        badge: p.badge || '',
-        variant: p.variant || 'default',
-        imageUrl: p.imageUrl || '',
-        bgImageUrl: p.bgImageUrl || '',
-        slot: p.slot || 'general',
-        position: p.position ?? 0,
-      })),
+      // Banners: Active + within schedule window, grouped by website placement
+      promos: promos.map(presentBanner),
+      banners: groupByPlacement(promos.map(presentBanner)),
+      featuredProducts: featuredRaw.map(leanProductCard),
+      newArrivals: newArrivalsRaw.map(leanProductCard),
+      bestSellers,
       landingImages: serializeMany(landingImages).map((img) => ({
         id: img.id,
         slot: img.slot,
@@ -151,7 +220,7 @@ class HomeService {
         color: c.color || '',
         position: c.homePosition ?? 0,
       })),
-      popularProducts: popularProducts.map(leanProductCard),
+      popularProducts: popularList.map(leanProductCard),
       bundles,
       testimonials,
     };
@@ -202,16 +271,36 @@ class HomeService {
       Bundle.find(filter).sort({ position: 1, createdAt: -1 }).skip(skip).limit(limit).lean(),
       Bundle.countDocuments(filter),
     ]);
-    return { data: serializeMany(items), meta: buildMeta({ page, limit, total }) };
+    // Admin view: computed availability + purchasable flag (from live product stock/status)
+    const pids = [...new Set(items.flatMap((b) => (b.productIds || []).map(String)))];
+    const prods = pids.length ? await Product.find({ _id: { $in: pids } }).select('name status stock image').lean() : [];
+    const byId = new Map(prods.map((p) => [String(p._id), p]));
+    const data = items.map((b) => {
+      const view = bundleView(b, byId);
+      return { ...serialize(b), availability: view.stock, purchasable: view.purchasable };
+    });
+    return { data, meta: buildMeta({ page, limit, total }) };
+  }
+
+  async #assertPricing(body, existing = {}) {
+    const price = body.price ?? existing.price;
+    const mrp = body.mrp ?? existing.mrp;
+    if (price != null && mrp != null && Number(price) > Number(mrp)) {
+      throw ApiError.badRequest('Bundle price cannot be higher than MRP');
+    }
   }
 
   async createBundle(body) {
+    await this.#assertPricing(body);
     const doc = await Bundle.create(body);
     invalidateHomeCaches();
     return serialize(doc);
   }
 
   async updateBundle(id, body) {
+    const existing = await Bundle.findById(id).select('price mrp').lean();
+    if (!existing) throw ApiError.notFound('Bundle not found');
+    await this.#assertPricing(body, existing);
     const doc = await Bundle.findByIdAndUpdate(id, body, { new: true, runValidators: true }).lean();
     if (!doc) throw ApiError.notFound('Bundle not found');
     invalidateHomeCaches();

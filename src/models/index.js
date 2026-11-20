@@ -13,3 +13,5 @@ export { default as Settings } from './Settings.js';
 export { default as CmsContent } from './CmsContent.js';
 export { default as Bundle } from './Bundle.js';
 export { default as HomeLandingImage } from './HomeLandingImage.js';
+export { default as Coupon } from "./Coupon.js";
+export { default as RefreshToken } from "./RefreshToken.js";

@@ -49,6 +49,24 @@ class Config {
     this.clientUrls = parseClientUrls(process.env.CLIENT_URL);
     this.jwtSecret = process.env.JWT_SECRET || 'dev-only-change-me';
     this.jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
+    // Customer site: short-lived access token + rotating httpOnly refresh cookie.
+    // Staff (admin panel) keep jwtExpiresIn above — admin auth flow is unchanged.
+    this.customerAccessTtl = process.env.CUSTOMER_ACCESS_TOKEN_TTL || '15m';
+    this.refreshTokenDays = clampInt(process.env.REFRESH_TOKEN_DAYS, 30, 1, 365);
+    this.cookieSecure = process.env.COOKIE_SECURE
+      ? process.env.COOKIE_SECURE === 'true'
+      : this.isProduction;
+    this.cookieSameSite = process.env.COOKIE_SAMESITE || (this.isProduction ? 'none' : 'lax');
+
+    // Payments — Razorpay stays OFF unless explicitly enabled AND fully configured.
+    this.razorpay = {
+      keyId: process.env.RAZORPAY_KEY_ID || '',
+      keySecret: process.env.RAZORPAY_KEY_SECRET || '',
+      webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
+    };
+    this.paymentsEnabled =
+      process.env.PAYMENTS_ENABLED === 'true' &&
+      Boolean(this.razorpay.keyId && this.razorpay.keySecret && this.razorpay.webhookSecret);
 
     this.storageProvider = normalizeProvider(process.env.STORAGE_PROVIDER);
     this.storageSignedUrlExpires = Number(process.env.STORAGE_SIGNED_URL_EXPIRES) || 3600;

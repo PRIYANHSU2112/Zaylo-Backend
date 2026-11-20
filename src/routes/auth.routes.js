@@ -2,7 +2,12 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import AuthController from '../controllers/AuthController.js';
 import validate from '../middlewares/validate.middleware.js';
-import { loginSchema, registerSchema, profileUpdateSchema } from '../validations/index.js';
+import {
+  loginSchema,
+  registerSchema,
+  profileUpdateSchema,
+  changePasswordSchema,
+} from '../validations/index.js';
 import asyncHandler from '../middlewares/asyncHandler.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 
@@ -13,6 +18,7 @@ const authLimiter = rateLimit({
   max: 40,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { success: false, message: 'Too many auth attempts' },
 });
 
@@ -29,6 +35,9 @@ router.post(
   validate(loginSchema),
   asyncHandler(AuthController.login.bind(AuthController)),
 );
+
+router.post('/refresh', authLimiter, asyncHandler(AuthController.refresh.bind(AuthController)));
+router.post('/logout', asyncHandler(AuthController.logout.bind(AuthController)));
 
 router.get('/me', authenticate, asyncHandler(AuthController.me.bind(AuthController)));
 

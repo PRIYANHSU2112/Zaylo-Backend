@@ -103,7 +103,7 @@ class AdminService {
       recentOrders,
       recentDealers,
     ] = await Promise.all([
-      Order.find(dateFilter).select('amount status createdAt date').lean(),
+      Order.find(dateFilter).select('amount status paymentStatus createdAt date').lean(),
       Dealer.countDocuments({ ...dateFilter, status: 'Pending' }),
       BulkOrder.countDocuments({ ...dateFilter, status: 'Pending' }),
       Contact.countDocuments({ ...dateFilter, status: 'New' }),
@@ -116,13 +116,19 @@ class AdminService {
     ]);
 
     const paidOrders = ordersInRange.filter((o) => o.status !== 'Cancelled');
+    // Booked = all non-cancelled orders; collected = payment actually received.
     const totalRevenue = paidOrders.reduce((s, o) => s + (o.amount || 0), 0);
+    const collectedRevenue = ordersInRange
+      .filter((o) => o.paymentStatus === 'Paid')
+      .reduce((s, o) => s + (o.amount || 0), 0);
     const activeOrders = ordersInRange.filter((o) =>
-      ['Pending', 'Shipped'].includes(o.status),
+      ['Pending', 'Confirmed', 'Packed', 'Shipped'].includes(o.status),
     ).length;
 
     const orderStatusBreakdown = {
       Pending: 0,
+      Confirmed: 0,
+      Packed: 0,
       Shipped: 0,
       Delivered: 0,
       Cancelled: 0,
@@ -145,6 +151,7 @@ class AdminService {
 
     return {
       totalRevenue,
+      collectedRevenue,
       activeOrders,
       pendingDealers,
       pendingBulk,

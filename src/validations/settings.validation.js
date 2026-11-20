@@ -43,6 +43,15 @@ export const settingsUpdateSchema = joi
       label: joi.string().allow(''),
       embedUrl: joi.string().allow(''),
     }),
+    commerce: joi.object({
+      shippingFee: joi.number().min(0),
+      freeShippingThreshold: joi.number().min(0),
+      codEnabled: joi.boolean(),
+      codFee: joi.number().min(0),
+      taxPercent: joi.number().min(0).max(100),
+      minOrderAmount: joi.number().min(0),
+      maxQtyPerItem: joi.number().integer().min(1).max(999),
+    }),
     general: joi.object({
       siteName: joi.string().allow(''),
       siteTagline: joi.string().allow(''),

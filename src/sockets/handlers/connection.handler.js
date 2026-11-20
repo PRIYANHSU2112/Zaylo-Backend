@@ -30,12 +30,19 @@ export function registerConnectionHandlers(socket, io) {
     logger.error(`Socket error [${socket.id}]`, err);
   });
 
-  // Placeholder for room joins used by future order/admin features
+  // Rooms: staff → 'staff' (+ any 'admin:*'); signed-in users → 'user:<id>' only.
+  const user = socket.data.user;
+  const isStaff = ['Admin', 'Manager'].includes(user?.role);
+  if (isStaff) socket.join('staff');
+  const ownRoom = user?.id ? `user:${user.id}` : null;
+  if (ownRoom) socket.join(ownRoom);
+
   socket.on('join:room', (room) => {
-    if (typeof room === 'string' && room.trim()) {
-      socket.join(room.trim());
-      socket.emit('joined:room', { room: room.trim() });
-    }
+    const name = typeof room === 'string' ? room.trim() : '';
+    const allowed = (isStaff && name.startsWith('admin:')) || (ownRoom && name === ownRoom);
+    if (!allowed) return socket.emit('error:room', { room: name, message: 'Not allowed' });
+    socket.join(name);
+    socket.emit('joined:room', { room: name });
   });
 }
 

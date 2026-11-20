@@ -47,6 +47,16 @@ const settingsSchema = new mongoose.Schema(
       label: { type: String, default: 'Sonipat, Haryana — Manufacturing Hub' },
       embedUrl: { type: String, default: '' },
     },
+    // Checkout pricing rules (admin-editable). Payment enablement is env-only (PAYMENTS_ENABLED).
+    commerce: {
+      shippingFee: { type: Number, default: 40, min: 0 },
+      freeShippingThreshold: { type: Number, default: 499, min: 0 }, // 0 = never free
+      codEnabled: { type: Boolean, default: true },
+      codFee: { type: Number, default: 0, min: 0 },
+      taxPercent: { type: Number, default: 0, min: 0, max: 100 }, // added on top; 0 = prices tax-inclusive
+      minOrderAmount: { type: Number, default: 0, min: 0 },
+      maxQtyPerItem: { type: Number, default: 50, min: 1 },
+    },
     general: {
       siteName: { type: String, default: "ZAY'LO" },
       siteTagline: { type: String, default: '' },

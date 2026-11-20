@@ -20,3 +20,5 @@ export const uploadPresignSchema = joi.object({
 export const uploadCompleteSchema = joi.object({
   key: joi.string().required().max(512),
 });
+
+export const uploadDeleteSchema = joi.object({ url: joi.string().uri().max(1000).required() });

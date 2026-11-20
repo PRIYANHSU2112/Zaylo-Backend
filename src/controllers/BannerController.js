@@ -2,9 +2,10 @@ import ContentService from '../services/ContentService.js';
 import ApiResponse from '../utils/ApiResponse.js';
 
 class BannerController {
-  async listPublic(_req, res) {
-    const data = await ContentService.getBanners();
-    res.set('Cache-Control', 'public, max-age=120');
+  async listPublic(req, res) {
+    const placement = typeof req.query.placement === 'string' ? req.query.placement : '';
+    const data = await ContentService.getBanners(placement);
+    res.set('Cache-Control', 'public, max-age=60');
     return ApiResponse.ok(res, data);
   }
 

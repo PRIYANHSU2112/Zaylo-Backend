@@ -4,7 +4,16 @@ import bcrypt from 'bcryptjs';
 const addressSchema = new mongoose.Schema(
   {
     type: { type: String, default: 'Home', trim: true },
+    // Formatted one-line address (legacy records only have this field)
     address: { type: String, required: true, trim: true },
+    name: { type: String, default: '', trim: true },
+    phone: { type: String, default: '', trim: true },
+    line1: { type: String, default: '', trim: true },
+    line2: { type: String, default: '', trim: true },
+    city: { type: String, default: '', trim: true },
+    state: { type: String, default: '', trim: true },
+    pincode: { type: String, default: '', trim: true },
+    isDefault: { type: Boolean, default: false },
   },
   { _id: true },
 );
@@ -35,6 +44,17 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
     addresses: [addressSchema],
+    // Server-side cart / wishlist (prices are always resolved from Product at read time)
+    cart: [
+      {
+        _id: false,
+        // Exactly one of product / bundle (enforced by AccountService + Joi)
+        product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+        bundle: { type: mongoose.Schema.Types.ObjectId, ref: 'Bundle' },
+        quantity: { type: Number, required: true, min: 1, max: 99 },
+      },
+    ],
+    wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
     dateJoined: { type: Date, default: Date.now },
   },
   { timestamps: true },

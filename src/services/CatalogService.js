@@ -6,12 +6,76 @@ import { serialize, serializeMany, slugify } from '../utils/serialize.js';
 import { cacheGet, cacheSet, cacheDelPrefix } from '../utils/cache.js';
 import { invalidateHomeCaches } from './HomeService.js';
 
+/** Public product shape: derived discount, no internal fields. */
+export function publicProduct(doc) {
+  const p = serialize(doc);
+  if (!p) return p;
+  const images = (p.images?.length ? p.images : [p.image]).filter(Boolean);
+  if (p.nutrition) delete p.nutrition.protein; // content restriction (legacy data)
+  return {
+    ...p,
+    images,
+    discountPercent: p.mrp > p.price ? Math.round(((p.mrp - p.price) / p.mrp) * 100) : 0,
+  };
+}
+
+/** Normalise admin input: gallery ↔ primary image, empty SKU removed, trimmed lists. */
+function normalizeProductBody(body) {
+  const data = { ...body };
+  if (Array.isArray(data.images)) {
+    data.images = [...new Set(data.images.filter(Boolean))].slice(0, 8);
+    if (data.images.length) data.image = data.images[0];
+  } else if (data.image) {
+    data.images = [data.image];
+  }
+  if (data.sku === '') delete data.sku;
+  if (Array.isArray(data.ingredients)) data.ingredients = data.ingredients.map((i) => i.trim()).filter(Boolean);
+  delete data.rating;
+  delete data.reviewCount;
+  return data;
+}
+
+/** A product can only go Active once the essentials exist (drafts may be incomplete). */
+function assertPublishable(p) {
+  if (p.status !== 'Active') return;
+  const missing = [];
+  if (!p.category) missing.push('category');
+  if (!(Number(p.price) > 0)) missing.push('selling price');
+  if (!(Number(p.mrp) > 0)) missing.push('MRP');
+  if (!p.image && !(p.images || []).length) missing.push('image');
+  if (missing.length) {
+    throw ApiError.badRequest(`Add ${missing.join(', ')} before publishing this product`);
+  }
+}
+
 class CatalogService {
   async listPublicProducts(query) {
-    const { page, limit, skip, sort, q } = parseListQuery(query);
+    const { page, limit, skip, q } = parseListQuery(query);
     const filter = { status: 'Active' };
+    const SORTS = {
+      popular: { isPopular: -1, homePosition: 1, createdAt: -1 },
+      newest: { createdAt: -1 },
+      'price-asc': { price: 1, createdAt: -1 },
+      'price-desc': { price: -1, createdAt: -1 },
+      rating: { rating: -1, reviewCount: -1 },
+      name: { name: 1 },
+    };
+    const sort = SORTS[query.sort] || SORTS.popular;
 
-    if (query.category) filter.category = query.category;
+    if (query.category) {
+      const cats = String(query.category).split(',').map((c) => c.trim()).filter(Boolean).slice(0, 20);
+      filter.category = cats.length > 1 ? { $in: cats } : cats[0];
+    }
+    const min = Number(query.minPrice);
+    const max = Number(query.maxPrice);
+    if (Number.isFinite(min) || Number.isFinite(max)) {
+      filter.price = {};
+      if (Number.isFinite(min)) filter.price.$gte = min;
+      if (Number.isFinite(max)) filter.price.$lte = max;
+    }
+    if (query.inStock === 'true') filter.stock = { $gt: 0 };
+    if (query.featured === 'true') filter.isFeatured = true;
+    if (query.exclude) filter.slug = { $ne: String(query.exclude) };
     if (q) {
       filter.$or = [
         { name: new RegExp(escapeRegex(q), 'i') },
@@ -25,7 +89,7 @@ class CatalogService {
       Product.countDocuments(filter),
     ]);
 
-    return { data: serializeMany(items), meta: buildMeta({ page, limit, total }) };
+    return { data: items.map(publicProduct), meta: buildMeta({ page, limit, total }) };
   }
 
   async getBySlug(slug) {
@@ -40,7 +104,7 @@ class CatalogService {
       .limit(4)
       .lean();
 
-    return { product: serialize(product), related: serializeMany(related) };
+    return { product: publicProduct(product), related: related.map(publicProduct) };
   }
 
   async listAdminProducts(query) {
@@ -52,10 +116,12 @@ class CatalogService {
     if (query.stockBand === 'instock') filter.stock = { $gt: 15 };
     if (query.stockBand === 'lowstock') filter.stock = { $gte: 1, $lte: 15 };
     if (query.stockBand === 'outofstock') filter.stock = 0;
+    if (query.featured === 'true') filter.isFeatured = true;
     if (q) {
       filter.$or = [
         { name: new RegExp(escapeRegex(q), 'i') },
         { slug: new RegExp(escapeRegex(q), 'i') },
+        { sku: new RegExp(escapeRegex(q), 'i') },
         { tagline: new RegExp(escapeRegex(q), 'i') },
       ];
     }
@@ -73,14 +139,9 @@ class CatalogService {
     const exists = await Product.findOne({ slug }).lean();
     if (exists) throw ApiError.conflict('Product slug already exists');
 
-    const doc = await Product.create({
-      ...body,
-      slug,
-      isVeg: body.isVeg ?? true,
-      isNew: body.isNew ?? false,
-      rating: body.rating ?? 5,
-      reviewCount: body.reviewCount ?? 0,
-    });
+    const data = normalizeProductBody({ ...body, slug });
+    assertPublishable({ ...data, status: data.status || 'Active' });
+    const doc = await Product.create({ ...data, isVeg: data.isVeg ?? true, isNew: data.isNew ?? false });
     cacheDelPrefix('categories:');
     invalidateHomeCaches();
     return serialize(doc);
@@ -90,16 +151,32 @@ class CatalogService {
     if (body.slug) body.slug = slugify(body.slug);
     if (body.name && !body.slug) body.slug = slugify(body.name);
 
-    const doc = await Product.findByIdAndUpdate(id, body, {
-      new: true,
-      runValidators: true,
-    }).lean();
+    const existing = await Product.findById(id).lean();
+    if (!existing) throw ApiError.notFound('Product not found');
+    const data = normalizeProductBody(body);
+    const merged = { ...existing, ...data };
+    if (merged.price > merged.mrp) throw ApiError.badRequest('Selling price cannot be higher than MRP');
+    // Publish rules apply when a draft becomes Active (editing live products stays possible)
+    if (data.status === 'Active' && existing.status !== 'Active') assertPublishable(merged);
+
+    const update = { $set: data };
+    if (body.sku === '') {
+      delete update.$set.sku;
+      update.$unset = { sku: 1 };
+    }
+    const doc = await Product.findByIdAndUpdate(id, update, { new: true, runValidators: true }).lean();
     if (!doc) throw ApiError.notFound('Product not found');
     invalidateHomeCaches();
     return serialize(doc);
   }
 
   async setProductStatus(id, status) {
+    if (status === 'Active') {
+      // only when publishing a non-active product
+      const existing = await Product.findById(id).lean();
+      if (!existing) throw ApiError.notFound('Product not found');
+      if (existing.status !== 'Active') assertPublishable({ ...existing, status });
+    }
     const doc = await Product.findByIdAndUpdate(
       id,
       { status },
